@@ -9,6 +9,7 @@ import { Disputer } from "../../contracts/Disputer.sol";
 import { DistributorTest } from "./Distributor.t.sol";
 import { IAccessControlManager } from "../../contracts/interfaces/IAccessControlManager.sol";
 import { Errors } from "../../contracts/utils/Errors.sol";
+import { MockTokenPermit } from "../../contracts/mock/MockTokenPermit.sol";
 
 contract DisputerTest is DistributorTest {
     Disputer public disputer;
@@ -137,5 +138,32 @@ contract DisputerTest is DistributorTest {
         vm.expectRevert(Errors.WithdrawalFailed.selector);
         disputer.withdrawFunds(payable(governor), amount);
         vm.stopPrank();
+    }
+
+    function test_setDistributor_leavesStaleAllowance() public {
+        // Step 1: Check initial approval - Disputer approved tokenA (angle) for distributor1
+        address tokenA = address(distributor.disputeToken());
+        uint256 allowanceBefore = IERC20(tokenA).allowance(address(disputer), address(distributor));
+        assertGt(allowanceBefore, 0, "Initial allowance should be infinite");
+
+        // Step 2: Governor changes disputeToken on old distributor to tokenB
+        MockTokenPermit tokenB = new MockTokenPermit("TokenB", "TB", 18);
+        vm.prank(governor);
+        distributor.setDisputeToken(IERC20(address(tokenB)));
+
+        // Step 3: Deploy new distributor with tokenB
+        Distributor distributorImpl2 = new Distributor();
+        Distributor distributor2 = Distributor(deployUUPS(address(distributorImpl2), hex""));
+        vm.startPrank(governor);
+        distributor2.initialize(IAccessControlManager(address(accessControlManager)));
+        distributor2.setDisputeToken(IERC20(address(tokenB)));
+
+        // Step 4: Call setDistributor - this will revoke tokenB approval, not tokenA
+        disputer.setDistributor(distributor2);
+        vm.stopPrank();
+
+        // Step 5: Assert stale allowance remains on tokenA for old distributor
+        uint256 staleAllowance = IERC20(tokenA).allowance(address(disputer), address(distributor));
+        assertEq(staleAllowance, 0, "Stale allowance should be zero after fix");
     }
 }

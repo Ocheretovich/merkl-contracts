@@ -12,6 +12,10 @@ contract Disputer is Ownable {
     Distributor public distributor;
     mapping(address => bool) public whitelist;
 
+    /// @notice Token for which infinite approval was last granted to the distributor
+    /// @dev Tracked explicitly to ensure correct revocation when disputeToken changes
+    address public approvedToken;
+
     /*//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
                                                        MODIFIERS                                                    
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////*/
@@ -29,8 +33,11 @@ contract Disputer is Ownable {
     constructor(address _owner, address[] memory _initialWhitelist, Distributor _distributor) {
         distributor = _distributor;
 
-        // Set infinite approval for the distributor
-        IERC20(_distributor.disputeToken()).approve(address(_distributor), type(uint256).max);
+        // Set infinite approval for the distributor and track the approved token
+        address _disputeToken = address(_distributor.disputeToken());
+        approvedToken = _disputeToken;
+        IERC20(_disputeToken).approve(address(_distributor), type(uint256).max);
+
         uint256 length = _initialWhitelist.length;
         for (uint256 i; i < length; ) {
             whitelist[_initialWhitelist[i]] = true;
@@ -100,10 +107,13 @@ contract Disputer is Ownable {
     /// @dev Only the owner can set the distributor
     /// @param _distributor Distributor to set
     function setDistributor(Distributor _distributor) external onlyOwner {
-        // Remove approval from old distributor
-        IERC20(distributor.disputeToken()).approve(address(distributor), 0);
+        // Revoke approval using the tracked approvedToken, not distributor.disputeToken()
+        // which may have changed since the approval was granted
+        IERC20(approvedToken).approve(address(distributor), 0);
         distributor = _distributor;
-        // Set infinite approval for new distributor
-        IERC20(_distributor.disputeToken()).approve(address(_distributor), type(uint256).max);
+        // Set infinite approval for new distributor and update tracked token
+        address _newDisputeToken = address(_distributor.disputeToken());
+        approvedToken = _newDisputeToken;
+        IERC20(_newDisputeToken).approve(address(_distributor), type(uint256).max);
     }
 }
